@@ -123,8 +123,10 @@ function update() {
   if (state !== 'play') return;
 
   // Player physics
-  player.vy += 0.45 * player.gravity;
-  player.vy *= 0.98;
+  player.vy += 0.25 * player.gravity;
+  player.vy *= 0.97;
+  if (player.vy > 5) player.vy = 5;
+  if (player.vy < -5) player.vy = -5;
   player.y += player.vy;
 
   // Trail
