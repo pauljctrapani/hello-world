@@ -73,34 +73,24 @@ function resetGame() {
   frameCount = 0;
 }
 
-function flipGravity() {
-  if (state === 'menu') {
-    resetGame();
-    state = 'play';
-    return;
-  }
-  if (state === 'dead') {
-    resetGame();
-    state = 'play';
-    return;
-  }
-  player.gravity *= -1;
-  // Burst particles on flip
-  for (let i = 0; i < 8; i++) {
-    particles.push({
-      x: player.x, y: player.y,
-      vx: (Math.random() - 0.5) * 4,
-      vy: (Math.random() - 0.5) * 4,
-      life: 30, maxLife: 30,
-      color: player.gravity === 1 ? NEON_CYAN : NEON_PINK,
-      size: Math.random() * 4 + 2
-    });
-  }
+let holding = false;
+
+function startHold() {
+  if (state === 'menu') { resetGame(); state = 'play'; }
+  else if (state === 'dead') { resetGame(); state = 'play'; }
+  holding = true;
+}
+
+function endHold() {
+  holding = false;
 }
 
 // Input
-canvas.addEventListener('pointerdown', (e) => { e.preventDefault(); flipGravity(); });
-document.addEventListener('keydown', (e) => { if (e.code === 'Space') flipGravity(); });
+canvas.addEventListener('pointerdown', (e) => { e.preventDefault(); startHold(); });
+canvas.addEventListener('pointerup', (e) => { e.preventDefault(); endHold(); });
+canvas.addEventListener('pointercancel', (e) => { e.preventDefault(); endHold(); });
+document.addEventListener('keydown', (e) => { if (e.code === 'Space' && !e.repeat) startHold(); });
+document.addEventListener('keyup', (e) => { if (e.code === 'Space') endHold(); });
 
 function spawnObstacle() {
   const h = H();
@@ -122,9 +112,13 @@ function update() {
 
   if (state !== 'play') return;
 
-  // Player physics
-  player.vy += 0.25 * player.gravity;
-  player.vy *= 0.97;
+  // Player physics: hold to rise, release to fall
+  if (holding) {
+    player.vy -= 0.35;
+  } else {
+    player.vy += 0.25;
+  }
+  player.vy *= 0.96;
   if (player.vy > 5) player.vy = 5;
   if (player.vy < -5) player.vy = -5;
   player.y += player.vy;
@@ -239,7 +233,7 @@ function draw() {
   ctx.globalAlpha = 1;
 
   // Border lines (neon)
-  const borderGlow = player.gravity === 1 ? NEON_CYAN : NEON_PINK;
+  const borderGlow = holding ? NEON_PINK : NEON_CYAN;
   ctx.shadowColor = borderGlow;
   ctx.shadowBlur = 15;
   ctx.strokeStyle = borderGlow;
@@ -265,7 +259,7 @@ function draw() {
     player.trail.forEach(t => {
       const alpha = t.life / 15;
       ctx.globalAlpha = alpha * 0.5;
-      const c = player.gravity === 1 ? NEON_CYAN : NEON_PINK;
+      const c = holding ? NEON_PINK : NEON_CYAN;
       ctx.fillStyle = c;
       ctx.beginPath();
       ctx.arc(t.x, t.y, player.size * alpha * 0.6, 0, Math.PI * 2);
@@ -276,7 +270,7 @@ function draw() {
 
   // Player
   if (state === 'play' || state === 'menu') {
-    const pColor = player.gravity === 1 ? NEON_CYAN : NEON_PINK;
+    const pColor = holding ? NEON_PINK : NEON_CYAN;
     ctx.shadowColor = pColor;
     ctx.shadowBlur = 20;
     ctx.fillStyle = pColor;
