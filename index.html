@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Gravity Flip</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0a1a; }
+  canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+
+function resize() {
+  canvas.width = window.innerWidth * devicePixelRatio;
+  canvas.height = window.innerHeight * devicePixelRatio;
+  ctx.scale(devicePixelRatio, devicePixelRatio);
+}
+resize();
+window.addEventListener('resize', resize);
+
+const W = () => window.innerWidth;
+const H = () => window.innerHeight;
+
+// Game state
+let state = 'menu'; // menu, play, dead
+let score = 0;
+let highScore = parseInt(localStorage.getItem('gravFlipHi') || '0');
+let frameCount = 0;
+
+// Player
+const player = { x: 0, y: 0, vy: 0, size: 18, gravity: 1, trail: [] };
+
+// Obstacles
+let obstacles = [];
+let particles = [];
+let stars = [];
+let speed = 3;
+let spawnTimer = 0;
+let spawnInterval = 90;
+
+// Colors
+const NEON_CYAN = '#00f0ff';
+const NEON_PINK = '#ff2d95';
+const NEON_YELLOW = '#ffe14d';
+const BG = '#0a0a1a';
+
+function initStars() {
+  stars = [];
+  for (let i = 0; i < 80; i++) {
+    stars.push({ x: Math.random() * 2000, y: Math.random() * 2000, s: Math.random() * 2 + 0.5, speed: Math.random() * 0.5 + 0.2 });
+  }
+}
+initStars();
+
+function resetGame() {
+  player.x = W() * 0.2;
+  player.y = H() / 2;
+  player.vy = 0;
+  player.gravity = 1;
+  player.trail = [];
+  obstacles = [];
+  particles = [];
+  score = 0;
+  speed = 3;
+  spawnTimer = 0;
+  spawnInterval = 90;
+  frameCount = 0;
+}
+
+function flipGravity() {
+  if (state === 'menu') {
+    resetGame();
+    state = 'play';
+    return;
+  }
+  if (state === 'dead') {
+    resetGame();
+    state = 'play';
+    return;
+  }
+  player.gravity *= -1;
+  // Burst particles on flip
+  for (let i = 0; i < 8; i++) {
+    particles.push({
+      x: player.x, y: player.y,
+      vx: (Math.random() - 0.5) * 4,
+      vy: (Math.random() - 0.5) * 4,
+      life: 30, maxLife: 30,
+      color: player.gravity === 1 ? NEON_CYAN : NEON_PINK,
+      size: Math.random() * 4 + 2
+    });
+  }
+}
+
+// Input
+canvas.addEventListener('pointerdown', (e) => { e.preventDefault(); flipGravity(); });
+document.addEventListener('keydown', (e) => { if (e.code === 'Space') flipGravity(); });
+
+function spawnObstacle() {
+  const h = H();
+  const gapSize = Math.max(h * 0.28, 100);
+  const minY = h * 0.1;
+  const maxY = h * 0.9 - gapSize;
+  const gapY = Math.random() * (maxY - minY) + minY;
+  const w = 30 + Math.random() * 20;
+
+  obstacles.push(
+    { x: W() + 10, y: 0, w: w, h: gapY, passed: false },
+    { x: W() + 10, y: gapY + gapSize, w: w, h: h - (gapY + gapSize), passed: false }
+  );
+}
+
+function update() {
+  const w = W(), h = H();
+  frameCount++;
+
+  if (state !== 'play') return;
+
+  // Player physics
+  player.vy += 0.45 * player.gravity;
+  player.vy *= 0.98;
+  player.y += player.vy;
+
+  // Trail
+  player.trail.push({ x: player.x, y: player.y, life: 15 });
+  if (player.trail.length > 20) player.trail.shift();
+  player.trail.forEach(t => t.life--);
+  player.trail = player.trail.filter(t => t.life > 0);
+
+  // Boundaries
+  if (player.y - player.size < 0 || player.y + player.size > h) {
+    die();
+    return;
+  }
+
+  // Spawn obstacles
+  spawnTimer++;
+  if (spawnTimer >= spawnInterval) {
+    spawnObstacle();
+    spawnTimer = 0;
+    // Increase difficulty
+    if (spawnInterval > 45) spawnInterval -= 0.5;
+    if (speed < 7) speed += 0.05;
+  }
+
+  // Move & check obstacles
+  for (let i = obstacles.length - 1; i >= 0; i--) {
+    const o = obstacles[i];
+    o.x -= speed;
+
+    // Score
+    if (!o.passed && o.x + o.w < player.x) {
+      o.passed = true;
+      score += 0.5; // Two rects per gate = 1 point
+    }
+
+    // Collision
+    if (
+      player.x + player.size > o.x &&
+      player.x - player.size < o.x + o.w &&
+      player.y + player.size > o.y &&
+      player.y - player.size < o.y + o.h
+    ) {
+      die();
+      return;
+    }
+
+    // Remove off-screen
+    if (o.x + o.w < -10) obstacles.splice(i, 1);
+  }
+
+  // Particles
+  particles.forEach(p => {
+    p.x += p.vx;
+    p.y += p.vy;
+    p.life--;
+  });
+  particles = particles.filter(p => p.life > 0);
+
+  // Stars
+  stars.forEach(s => { s.x -= s.speed * speed * 0.3; if (s.x < 0) s.x = w; });
+}
+
+function die() {
+  state = 'dead';
+  score = Math.floor(score);
+  if (score > highScore) {
+    highScore = score;
+    localStorage.setItem('gravFlipHi', String(highScore));
+  }
+  // Death particles
+  for (let i = 0; i < 30; i++) {
+    const angle = (Math.PI * 2 * i) / 30;
+    const spd = Math.random() * 5 + 2;
+    particles.push({
+      x: player.x, y: player.y,
+      vx: Math.cos(angle) * spd,
+      vy: Math.sin(angle) * spd,
+      life: 50, maxLife: 50,
+      color: [NEON_CYAN, NEON_PINK, NEON_YELLOW][i % 3],
+      size: Math.random() * 5 + 2
+    });
+  }
+}
+
+function drawGlow(x, y, radius, color) {
+  const grad = ctx.createRadialGradient(x, y, 0, x, y, radius);
+  grad.addColorStop(0, color);
+  grad.addColorStop(1, 'transparent');
+  ctx.fillStyle = grad;
+  ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+}
+
+function draw() {
+  const w = W(), h = H();
+  ctx.clearRect(0, 0, w, h);
+
+  // Background
+  ctx.fillStyle = BG;
+  ctx.fillRect(0, 0, w, h);
+
+  // Stars
+  stars.forEach(s => {
+    const alpha = 0.3 + Math.sin(frameCount * 0.02 + s.x) * 0.2;
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(s.x, s.y % h, s.s, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  ctx.globalAlpha = 1;
+
+  // Border lines (neon)
+  const borderGlow = player.gravity === 1 ? NEON_CYAN : NEON_PINK;
+  ctx.shadowColor = borderGlow;
+  ctx.shadowBlur = 15;
+  ctx.strokeStyle = borderGlow;
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(0, 1); ctx.lineTo(w, 1); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0, h - 1); ctx.lineTo(w, h - 1); ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  // Obstacles
+  obstacles.forEach(o => {
+    ctx.fillStyle = '#1a1a3a';
+    ctx.fillRect(o.x, o.y, o.w, o.h);
+    ctx.shadowColor = NEON_YELLOW;
+    ctx.shadowBlur = 10;
+    ctx.strokeStyle = NEON_YELLOW;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(o.x, o.y, o.w, o.h);
+    ctx.shadowBlur = 0;
+  });
+
+  // Trail
+  if (state === 'play') {
+    player.trail.forEach(t => {
+      const alpha = t.life / 15;
+      ctx.globalAlpha = alpha * 0.5;
+      const c = player.gravity === 1 ? NEON_CYAN : NEON_PINK;
+      ctx.fillStyle = c;
+      ctx.beginPath();
+      ctx.arc(t.x, t.y, player.size * alpha * 0.6, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+  }
+
+  // Player
+  if (state === 'play' || state === 'menu') {
+    const pColor = player.gravity === 1 ? NEON_CYAN : NEON_PINK;
+    ctx.shadowColor = pColor;
+    ctx.shadowBlur = 20;
+    ctx.fillStyle = pColor;
+    ctx.beginPath();
+    ctx.arc(player.x, player.y, player.size, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // Inner glow
+    ctx.fillStyle = '#ffffff';
+    ctx.globalAlpha = 0.6;
+    ctx.beginPath();
+    ctx.arc(player.x, player.y - 3, player.size * 0.4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  // Particles
+  particles.forEach(p => {
+    ctx.globalAlpha = p.life / p.maxLife;
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size * (p.life / p.maxLife), 0, Math.PI * 2);
+    ctx.fill();
+  });
+  ctx.globalAlpha = 1;
+
+  // UI Text
+  ctx.textAlign = 'center';
+
+  if (state === 'menu') {
+    player.x = w * 0.2;
+    player.y = h / 2 + Math.sin(frameCount * 0.03) * 30;
+
+    ctx.font = `bold ${Math.min(w * 0.12, 64)}px monospace`;
+    ctx.shadowColor = NEON_CYAN;
+    ctx.shadowBlur = 20;
+    ctx.fillStyle = NEON_CYAN;
+    ctx.fillText('GRAVITY', w / 2, h * 0.3);
+    ctx.fillStyle = NEON_PINK;
+    ctx.shadowColor = NEON_PINK;
+    ctx.fillText('FLIP', w / 2, h * 0.3 + Math.min(w * 0.13, 68));
+    ctx.shadowBlur = 0;
+
+    ctx.font = `${Math.min(w * 0.045, 20)}px monospace`;
+    ctx.fillStyle = '#888';
+    const tapText = 'TAP TO START';
+    ctx.globalAlpha = 0.5 + Math.sin(frameCount * 0.05) * 0.5;
+    ctx.fillText(tapText, w / 2, h * 0.65);
+    ctx.globalAlpha = 1;
+
+    if (highScore > 0) {
+      ctx.fillStyle = NEON_YELLOW;
+      ctx.fillText(`BEST: ${highScore}`, w / 2, h * 0.75);
+    }
+  }
+
+  if (state === 'play') {
+    ctx.font = `bold ${Math.min(w * 0.1, 48)}px monospace`;
+    ctx.fillStyle = 'rgba(255,255,255,0.15)';
+    ctx.fillText(Math.floor(score), w / 2, h * 0.15);
+  }
+
+  if (state === 'dead') {
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(0, 0, w, h);
+
+    ctx.font = `bold ${Math.min(w * 0.1, 52)}px monospace`;
+    ctx.shadowColor = NEON_PINK;
+    ctx.shadowBlur = 20;
+    ctx.fillStyle = NEON_PINK;
+    ctx.fillText('GAME OVER', w / 2, h * 0.35);
+    ctx.shadowBlur = 0;
+
+    ctx.font = `${Math.min(w * 0.07, 36)}px monospace`;
+    ctx.fillStyle = '#fff';
+    ctx.fillText(`SCORE: ${Math.floor(score)}`, w / 2, h * 0.48);
+
+    ctx.fillStyle = NEON_YELLOW;
+    ctx.fillText(`BEST: ${highScore}`, w / 2, h * 0.57);
+
+    ctx.font = `${Math.min(w * 0.04, 18)}px monospace`;
+    ctx.fillStyle = '#888';
+    ctx.globalAlpha = 0.5 + Math.sin(frameCount * 0.05) * 0.5;
+    ctx.fillText('TAP TO RETRY', w / 2, h * 0.7);
+    ctx.globalAlpha = 1;
+  }
+}
+
+function loop() {
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+resetGame();
+state = 'menu';
+loop();
+</script>
+</body>
+</html>
